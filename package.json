@@ -1,6 +1,6 @@
 {
   "name": "skill-firewall",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Scan AI agent skills (SKILL.md) for prompt injection and malicious instructions before your agent reads them.",
   "type": "module",
   "repository": {
