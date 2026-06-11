@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "description": "Scan AI agent skills (SKILL.md) for prompt injection and malicious instructions before your agent reads them.",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hotsa104/skill-firewall.git"
+  },
+  "homepage": "https://github.com/hotsa104/skill-firewall#readme",
+  "bugs": {
+    "url": "https://github.com/hotsa104/skill-firewall/issues"
+  },
   "license": "MIT",
   "engines": {
     "node": ">=20"
