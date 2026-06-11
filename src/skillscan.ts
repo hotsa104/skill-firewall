@@ -27,7 +27,7 @@ export interface SkillScanOptions {
   quarantine?: boolean;
   /** 隔離ディレクトリ名サフィックス（タイムスタンプ等）。quarantine 時必須 */
   stamp?: string;
-  /** LLM 二次判定を有効化（要 ANTHROPIC_API_KEY。flagged のみに限定実行＝コスト制御） */
+  /** LLM 二次判定を有効化（claude CLI か ANTHROPIC_API_KEY。flagged のみに限定実行＝コスト制御） */
   llm?: boolean;
 }
 

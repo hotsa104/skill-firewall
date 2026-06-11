@@ -35,7 +35,7 @@ export interface AddOptions {
   cwd: string;
   /** 配置先 skills ディレクトリ（既定: プロジェクト .claude/skills か ~/.claude/skills） */
   to?: string;
-  /** LLM 二次判定を併用（要 ANTHROPIC_API_KEY） */
+  /** LLM 二次判定を併用（claude CLI か ANTHROPIC_API_KEY） */
   llm?: boolean;
   /** 隔離ディレクトリ名サフィックス（タイムスタンプ等） */
   stamp: string;

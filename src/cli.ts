@@ -55,14 +55,17 @@ ${c("bold", "Options:")}
   --json         結果を JSON で出力（scan / scan-skills）
   --quiet        検出がなければ何も表示しない（scan / scan-skills）
   --quarantine   HIGH 検出かつ未承認のスキルを隔離（scan-skills / install-hook）
-  --llm          灰色(medium 以上)のみ Claude API で二次判定（要 ANTHROPIC_API_KEY）
+  --llm          灰色(medium 以上)のみ LLM で二次判定
+                 claude CLI があればそれを使用（サブスク認証・追加課金なし）。
+                 無ければ ANTHROPIC_API_KEY で API 直叩き。どちらも無ければスキップ
   --to <dir>     add の配置先 skills ディレクトリを指定
   --force        add で警告/危険があっても配置を強行
   --yes, -y      add の確認プロンプトに自動で yes（要確認止まりを承認）
 
 ${c("bold", "Env:")}
-  ANTHROPIC_API_KEY     --llm 判定に使用（未設定なら静かにスキップ）
-  SKILL_FIREWALL_MODEL  --llm 判定のモデル（既定: claude-opus-4-8）
+  ANTHROPIC_API_KEY          --llm の api バックエンド用（CI など claude CLI が無い環境）
+  SKILL_FIREWALL_LLM_BACKEND --llm のバックエンド固定: cli | api（既定: cli→api の順で自動）
+  SKILL_FIREWALL_MODEL       --llm のモデル指定（api の既定: claude-opus-4-8 / cli の既定: ユーザーの既定モデル）
 
 ${c("bold", "Exit codes:")}
   0  クリーン、または low(INFO) のみ
@@ -240,10 +243,12 @@ async function run(target: string, opts: { json: boolean; quiet: boolean; llm: b
   process.exit(hasHigh ? 2 : hasMedium ? 1 : 0);
 }
 
-/** --llm 指定だが API キーが無い場合に一度だけ注意を出す（静かにスキップはするが意図とのズレを伝える）。 */
+/** --llm 指定だがバックエンドが無い場合に一度だけ注意を出す（静かにスキップはするが意図とのズレを伝える）。 */
 function warnLlmUnavailable(llm: boolean): void {
   if (llm && !llmAvailable()) {
-    console.error(c("gray", "注: --llm 指定ですが ANTHROPIC_API_KEY が未設定のため LLM 判定をスキップします。"));
+    console.error(
+      c("gray", "注: --llm 指定ですが claude CLI も ANTHROPIC_API_KEY も見つからないため LLM 判定をスキップします。")
+    );
   }
 }
 

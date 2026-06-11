@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadRules, scanText, type Severity } from "../src/scanner.js";
-import { parseVerdict } from "../src/llm.js";
+import { parseVerdict, parseCliEnvelope, pickBackend } from "../src/llm.js";
 import { parseGitHub, isPinned, checkProvenance } from "../src/provenance.js";
 import { isBlocked, hasWarnings, type StagedScan } from "../src/add.js";
 import { flattenMcp, isMcpFile } from "../src/mcp.js";
@@ -79,6 +79,30 @@ console.log("\n[llm] — モデル出力 JSON のパース堅牢性");
 
   check("不正ラベルは却下", parseVerdict('{"label":"evil","confidence":"high"}') === null, "→ null");
   check("JSONなしは却下", parseVerdict("判定できませんでした") === null, "→ null");
+}
+
+// claude CLI バックエンド（オフライン: envelope パースとバックエンド選択ロジック）
+console.log("\n[llm-cli] — claude -p envelope のパース / バックエンド選択");
+{
+  const env = JSON.stringify({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    result: '```json\n{"label":"malicious","confidence":"high","declaredPurpose":"p","mismatch":true,"reasoning":"r"}\n```',
+  });
+  const inner = parseCliEnvelope(env);
+  const v = inner ? parseVerdict(inner) : null;
+  check("正常envelope→判定まで通る", v?.label === "malicious", `→ ${v?.label}`);
+
+  check("is_error=true は却下", parseCliEnvelope('{"is_error":true,"result":"x"}') === null, "→ null");
+  check("result欠落は却下", parseCliEnvelope('{"is_error":false}') === null, "→ null");
+  check("非JSONは却下", parseCliEnvelope("Execution error") === null, "→ null");
+
+  check("CLIあり→cli優先", pickBackend({ cli: true, apiKey: true }) === "cli", "");
+  check("キーのみ→api", pickBackend({ cli: false, apiKey: true }) === "api", "");
+  check("両方なし→null", pickBackend({ cli: false, apiKey: false }) === null, "");
+  check("api固定はCLIがあってもapi", pickBackend({ cli: true, apiKey: true, forced: "api" }) === "api", "");
+  check("cli固定でCLI無しはnull(apiに落ちない)", pickBackend({ cli: false, apiKey: true, forced: "cli" }) === null, "");
 }
 
 // 出所チェック（オフライン: URL パース・固定判定・ローカル判定）

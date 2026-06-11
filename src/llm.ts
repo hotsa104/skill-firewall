@@ -1,17 +1,29 @@
+import { spawn, spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import type { Finding } from "./scanner.js";
 
 /**
  * LLM 二次判定（F-3.2）。
  *
  * 静的 regex の原理的限界（同義語・文脈依存・宣言された目的と実際の指示の乖離）を
- * Claude API で補う。opt-in: ANTHROPIC_API_KEY が無ければ静かにスキップする
+ * LLM で補う。opt-in: バックエンドが無ければ静かにスキップする
  * （ネットワーク・コストを勝手に発生させない＝NFR プライバシー/コスト制御）。
  *
+ * バックエンドは2系統（自動選択。SKILL_FIREWALL_LLM_BACKEND=cli|api で固定可）:
+ * - cli: `claude` CLI（Claude Code）をヘッドレス起動。サブスクリプション認証で動くため
+ *   Claude Code ユーザーに API キーの二重課金を強いない。優先して使う
+ * - api: ANTHROPIC_API_KEY で /v1/messages を直叩き。CI や claude CLI が無い環境向け
+ *
+ * どちらも判定はホストエージェントとは無関係の別プロセス・新規コンテキストで行う
+ * （汚染された会話文脈に判定を置かない、という脅威モデル上の原則）。cli backend は
+ * `--tools ""` で全ツールを無効化し、審査対象テキストが判定器に行動を起こさせる
+ * 経路を塞いだ「ラベルを返すだけの分類器」として呼ぶ。
+ *
  * 依存ゼロの方針: サプライチェーン防御ツール自身が依存を最小化し模範であるべき、
- * という NFR に従い SDK を足さず Node 組込み fetch で /v1/messages を直接叩く。
+ * という NFR に従い SDK を足さず Node 組込みの fetch / child_process だけで実装する。
  */
 
-const DEFAULT_MODEL = "claude-opus-4-8";
+const DEFAULT_MODEL = "claude-opus-4-8"; // api backend の既定。cli backend はユーザーの既定モデルに従う
 const ENDPOINT = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 /** 判定に渡すスキル本文の上限（巨大ファイルでの暴走コスト防止。超過分は末尾を省略し注記）。 */
@@ -32,15 +44,57 @@ export interface LlmVerdict {
   model: string;
 }
 
+export type LlmBackend = "cli" | "api";
+
 export interface LlmOptions {
   apiKey?: string;
   model?: string;
   timeoutMs?: number;
+  backend?: LlmBackend;
 }
 
-/** API キーの有無で LLM 判定が使えるかを返す（opt-in 判定）。 */
-export function llmAvailable(apiKey = process.env.ANTHROPIC_API_KEY): boolean {
-  return typeof apiKey === "string" && apiKey.length > 0;
+let cliCache: boolean | null = null;
+
+/** `claude` CLI が PATH にあるか（プロセス内キャッシュ）。 */
+export function cliAvailable(): boolean {
+  if (cliCache !== null) return cliCache;
+  try {
+    const r =
+      process.platform === "win32"
+        ? spawnSync("where", ["claude"], { stdio: "ignore", timeout: 3000 })
+        : spawnSync("/bin/sh", ["-c", "command -v claude"], { stdio: "ignore", timeout: 3000 });
+    cliCache = r.status === 0;
+  } catch {
+    cliCache = false;
+  }
+  return cliCache;
+}
+
+/** バックエンド選択の純粋ロジック（テスト用に分離）。 */
+export function pickBackend(opts: {
+  cli: boolean;
+  apiKey: boolean;
+  forced?: string;
+}): LlmBackend | null {
+  if (opts.forced === "cli") return opts.cli ? "cli" : null;
+  if (opts.forced === "api") return opts.apiKey ? "api" : null;
+  if (opts.cli) return "cli";
+  if (opts.apiKey) return "api";
+  return null;
+}
+
+/** 実環境からバックエンドを解決する。null = LLM 判定は使えない（静かにスキップ）。 */
+export function resolveBackend(env: NodeJS.ProcessEnv = process.env): LlmBackend | null {
+  return pickBackend({
+    cli: cliAvailable(),
+    apiKey: typeof env.ANTHROPIC_API_KEY === "string" && env.ANTHROPIC_API_KEY.length > 0,
+    forced: env.SKILL_FIREWALL_LLM_BACKEND,
+  });
+}
+
+/** LLM 判定が使えるか（opt-in 判定）。claude CLI か API キーのどちらかがあれば true。 */
+export function llmAvailable(): boolean {
+  return resolveBackend() !== null;
 }
 
 export function llmModel(model = process.env.SKILL_FIREWALL_MODEL): string {
@@ -69,7 +123,7 @@ const SYSTEM = [
 
 /**
  * スキル本文を LLM で判定する。
- * @returns 判定結果。API キー未設定・エラー・パース不能時は null（=判定スキップ、静的結果のみ採用）。
+ * @returns 判定結果。バックエンド無し・エラー・パース不能時は null（=判定スキップ、静的結果のみ採用）。
  */
 export async function judge(
   content: string,
@@ -77,10 +131,8 @@ export async function judge(
   findings: Finding[],
   opts: LlmOptions = {}
 ): Promise<LlmVerdict | null> {
-  const apiKey = opts.apiKey ?? process.env.ANTHROPIC_API_KEY;
-  if (!llmAvailable(apiKey)) return null;
-  const model = llmModel(opts.model);
-  const timeoutMs = opts.timeoutMs ?? 30_000;
+  const backend = opts.backend ?? resolveBackend();
+  if (!backend) return null;
 
   const truncated =
     content.length > MAX_CONTENT_CHARS
@@ -104,6 +156,22 @@ export async function judge(
     "",
     "上記を判定し、指定の JSON のみを返してください。",
   ].join("\n");
+
+  if (backend === "cli") {
+    // 既定モデルを強制しない: サブスクのプランによっては使えないモデルがあるため、
+    // SKILL_FIREWALL_MODEL / opts.model が明示されたときだけ --model を渡す。
+    const modelOverride = opts.model ?? (process.env.SKILL_FIREWALL_MODEL || undefined);
+    const text = await invokeCli(userMsg, modelOverride, opts.timeoutMs ?? 120_000);
+    if (!text) return null;
+    const parsed = parseVerdict(text);
+    if (!parsed) return null;
+    return { ...parsed, model: modelOverride ?? "claude-code-default" };
+  }
+
+  const apiKey = opts.apiKey ?? process.env.ANTHROPIC_API_KEY;
+  if (typeof apiKey !== "string" || apiKey.length === 0) return null;
+  const model = llmModel(opts.model);
+  const timeoutMs = opts.timeoutMs ?? 30_000;
 
   let res: Response;
   try {
@@ -140,6 +208,80 @@ export async function judge(
   const parsed = parseVerdict(text);
   if (!parsed) return null;
   return { ...parsed, model };
+}
+
+/**
+ * `claude -p` をヘッドレス分類器として起動し、モデル出力テキストを返す。
+ * - `--tools ""`: 全ツール無効（審査対象テキストが判定器に行動させる経路を遮断）
+ * - `--setting-sources ""`: ユーザー/プロジェクト設定・フックを読み込まない
+ * - cwd は tmpdir: 呼び出し元プロジェクトの文脈を一切持ち込まない
+ * - プロンプトは stdin 渡し（argv 長制限と ps 露出の回避）
+ */
+function invokeCli(
+  userMsg: string,
+  modelOverride: string | undefined,
+  timeoutMs: number
+): Promise<string | null> {
+  const args = [
+    "-p",
+    "--output-format",
+    "json",
+    "--tools",
+    "",
+    "--no-session-persistence",
+    "--setting-sources",
+    "",
+    "--system-prompt",
+    SYSTEM,
+  ];
+  if (modelOverride) args.push("--model", modelOverride);
+
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn("claude", args, { cwd: tmpdir(), stdio: ["pipe", "pipe", "ignore"] });
+    } catch {
+      return resolve(null);
+    }
+    let out = "";
+    let done = false;
+    const finish = (v: string | null): void => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(v);
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish(null);
+    }, timeoutMs);
+    child.on("error", () => finish(null));
+    child.stdout?.on("data", (c: Buffer) => {
+      out += c.toString();
+    });
+    child.on("close", (code) => {
+      if (code !== 0) return finish(null);
+      finish(parseCliEnvelope(out));
+    });
+    child.stdin?.on("error", () => {}); // 起動即死時の EPIPE で落ちない
+    child.stdin?.write(userMsg);
+    child.stdin?.end();
+  });
+}
+
+/** `claude -p --output-format json` の envelope からモデル出力テキストを取り出す。テストからも使用。 */
+export function parseCliEnvelope(raw: string): string | null {
+  let o: unknown;
+  try {
+    o = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!o || typeof o !== "object") return null;
+  const env = o as { is_error?: unknown; result?: unknown };
+  if (env.is_error === true) return null;
+  if (typeof env.result !== "string" || env.result.trim().length === 0) return null;
+  return env.result;
 }
 
 /** Messages API レスポンスの content 配列から text ブロックを連結（thinking ブロックは無視）。 */
