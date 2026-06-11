@@ -1,0 +1,40 @@
+{
+  "name": "skill-firewall",
+  "version": "0.1.0",
+  "description": "Scan AI agent skills (SKILL.md) for prompt injection and malicious instructions before your agent reads them.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "skill-firewall": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "src/rules/rules.yaml"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "test": "tsx test/run.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "claude-code",
+    "skills",
+    "security",
+    "supply-chain",
+    "prompt-injection",
+    "mcp"
+  ],
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

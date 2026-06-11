@@ -1,0 +1,152 @@
+# skill-firewall static detection rules
+#
+# severity:
+#   high   - 既知の攻撃パターン。ほぼ確実に悪性。デフォルトで隔離対象
+#   medium - 危険だが正当な用途もありうる。警告表示
+#   low    - 注意喚起のみ。情報として表示（誤検知を避けるため隔離しない）
+#
+# 各ルールの patterns はいずれか1つでもマッチすれば検出。
+# regex は大文字小文字を無視（i フラグ）して評価する。
+
+- id: instruction-override
+  title: 指示の上書き・無視を要求
+  severity: high
+  description: >
+    エージェントに対し、それまでの指示やシステムプロンプトを無視・上書きするよう
+    促す典型的なプロンプトインジェクション。
+  patterns:
+    - 'ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|rules?)'
+    - 'disregard\s+(all\s+)?(previous|prior|above|the\s+system)'
+    - 'forget\s+(everything|all\s+previous|your\s+(instructions|rules))'
+    - 'override\s+(your|the)\s+(system\s+prompt|instructions|guidelines)'
+    - 'これまでの(指示|命令|ルール|プロンプト)を(無視|忘れ)'
+
+- id: covert-instruction
+  title: ユーザーに隠すよう要求（秘匿指示）
+  severity: high
+  description: >
+    実行内容をユーザーに報告・表示しないよう指示するパターン。
+    正当なスキルがこれを要求する理由はまずない。
+  patterns:
+    - 'do\s+not\s+(tell|inform|mention|notify|show)\s+(the\s+)?(user|human)'
+    - 'without\s+(telling|informing|notifying|alerting)\s+the\s+user'
+    - "don't\\s+(let|tell)\\s+the\\s+user\\s+know"
+    - 'keep\s+this\s+(secret|hidden|between\s+us)'
+    - 'silently\s+(run|execute|send|exfiltrate)'
+    - 'ユーザーに(伝え|教え|報告|表示)(ないで|るな|ず)'
+
+- id: credential-access
+  title: 認証情報・秘密鍵へのアクセス誘導
+  severity: high
+  description: >
+    SSH秘密鍵・クラウド認証情報など、ほぼ確実に秘匿すべき情報の「読み取り・露出」を指示。
+    トークン名への単なる言及（CI 解説等）は誤検知になるため、読み取り/出力/送信の動詞や
+    シェル変数展開を伴う文脈に限定する。
+  patterns:
+    - '(cat|read|print|echo|less|head|tail|copy|send|upload|exfiltrate|leak).{0,40}(~|\$HOME)?/?\.ssh/'
+    - '\.ssh/id_(rsa|ed25519|ecdsa)'
+    - '(cat|read|print|copy|send|upload|exfiltrate).{0,30}\.aws/credentials'
+    - '(AWS_SECRET_ACCESS_KEY|AWS_ACCESS_KEY_ID|-----BEGIN\s+[A-Z ]*PRIVATE KEY)'
+    # トークンの「値の露出」: export TOKEN=値 / echo $TOKEN / print process.env.TOKEN
+    - '(echo|print|cat|send|upload|curl).{0,40}\$\{?[A-Z_]*(GITHUB|NPM|GITLAB|GH|API)_?TOKEN'
+    - '(export\s+)?[A-Z_]*(GITHUB|NPM|GITLAB|GH|API)_?TOKEN\s*=\s*[''"]?[A-Za-z0-9_\-]{16,}'
+
+- id: env-file-access
+  title: .env / 環境変数へのアクセス
+  severity: medium
+  description: >
+    .env や環境変数の読み取り。設定参照など正当な用途も多いため medium。
+    外部送信（data-exfiltration）と同時に出る場合は要警戒。
+  patterns:
+    - '(read|cat|print|exfiltrate|send|upload|load).{0,40}\.env\b'
+    - 'process\.env'
+    - '(send|upload|exfiltrate|leak).{0,30}environment\s+variables?'
+
+- id: remote-code-execution
+  title: リモートスクリプトの取得＋実行
+  severity: high
+  description: curl/wget でスクリプトを取得し直接シェルに渡す典型的な侵害手口。
+  patterns:
+    - '(curl|wget)\s+[^|]*\|\s*(sudo\s+)?(sh|bash|zsh|python|node)'
+    - '(curl|wget)\s+[^;]*;\s*(sh|bash)\s'
+    - 'eval\s*\(\s*(atob|Buffer\.from|require\([''"]child_process)'
+    - 'bash\s+-c\s+["''].*\$\(curl'
+
+- id: encoded-payload
+  title: エンコードされたペイロード
+  severity: medium
+  description: >
+    Base64 等でエンコードされた長い文字列。難読化されたコマンドの隠蔽に使われる。
+    正当な用途（画像data URI等）もあるため medium。
+  patterns:
+    - 'base64\s+(-d|--decode|-D)'
+    - 'atob\s*\(\s*["''][A-Za-z0-9+/]{40,}'
+    # echo "<base64>" | base64 -d  （クォート有無の両対応）
+    - 'echo\s+["'']?[A-Za-z0-9+/]{40,}={0,2}["'']?\s*\|\s*base64'
+    - 'fromCharCode\s*\([\d,\s]{40,}\)'
+
+- id: data-exfiltration
+  title: 外部への情報送信
+  severity: medium
+  description: 取得したデータを外部エンドポイントへ送信する指示。
+  patterns:
+    - '(POST|PUT)\s+.{0,40}https?://'
+    - 'fetch\s*\(\s*["'']https?://[^"'']+["'']\s*,\s*\{[^}]*method'
+    - 'curl\s+(-X\s+)?(POST|PUT)\s+https?://'
+    - '(send|upload|exfiltrate|post)\s+(the\s+)?(data|file|content|result|output)\s+to\s+https?://'
+
+- id: hidden-unicode
+  title: 不可視・ゼロ幅文字による隠蔽
+  severity: high
+  description: >
+    ゼロ幅スペースやタグ文字など、人間には見えないがエージェントには読める
+    文字で指示を隠すステガノグラフィ的手口。
+  patterns:
+    # ゼロ幅・双方向制御・ソフトハイフン等の不可視文字
+    - '[​-‏‪-‮⁠-⁤﻿­]'
+    # Unicode タグ文字 U+E0000–U+E007F（サロゲートペアで表現）
+    - '\uDB40[\uDC00-\uDC7F]'
+
+- id: dangerous-filesystem
+  title: 破壊的ファイルシステム操作
+  severity: medium
+  description: rm -rf やディスク消去など破壊的コマンドの誘導。
+  patterns:
+    - 'rm\s+-rf?\s+(/|~|\$HOME|\*)'
+    - ':\(\)\s*\{\s*:\|\s*:&\s*\}'
+    - 'dd\s+if=/dev/(zero|random)\s+of=/'
+    - 'mkfs\.'
+
+- id: persistence-mechanism
+  title: 永続化・自動実行の仕込み
+  severity: medium
+  description: cron・shellrc・git hooks 等への書き込みでバックドアを常駐させる手口。
+  patterns:
+    - '(crontab|launchctl\s+load|systemctl\s+enable)'
+    - '>>\s*(~|\$HOME)?/?\.(bashrc|zshrc|profile|bash_profile)'
+    - '\.git/hooks/(pre-commit|post-checkout|post-merge|pre-push)'
+    - '(~|\$HOME)/Library/LaunchAgents'
+
+- id: tool-config-tampering
+  title: エージェント設定・他スキルの改ざん
+  severity: high
+  description: >
+    他のスキルやエージェント設定ファイル（settings.json, MCP設定等）を
+    書き換えて権限昇格・横展開を図る指示。
+  patterns:
+    - '(write|edit|modify|append).{0,30}\.claude/(settings|settings\.local)\.json'
+    - '(write|edit|modify).{0,30}\.mcp\.json'
+    - '(write|create|drop).{0,30}\.claude/skills/'
+    - 'allowedTools|permissions["'']?\s*:\s*\[?\s*["'']?\*'
+
+- id: mcp-unpinned-package
+  title: MCP サーバが未固定パッケージを自動実行
+  severity: low
+  description: >
+    .mcp.json の MCP サーバが npx --yes / uvx などでバージョン無指定のパッケージを
+    起動している。常に最新版を取得・実行するためサプライチェーン混入の窓口になりうる。
+    正当な構成も多いため情報(INFO)。バージョン固定（pkg@x.y.z）を推奨。
+  patterns:
+    # flattenMcp で平文化された "mcp <name> command: ..." 行に当たる
+    - 'command:.{0,40}\bnpx\s+(-y|--yes)\b'
+    - 'command:.{0,40}\buvx\s'
