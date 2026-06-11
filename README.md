@@ -45,28 +45,30 @@ Details are also injected into the agent's context, asking it not to trust the s
 details: `skill-firewall scan-skills` / quarantine: `skill-firewall scan-skills --quarantine`
 ```
 
-Remove it with `node dist/cli.js uninstall-hook`.
+Remove it with `skill-firewall uninstall-hook`.
 
 ### All commands (reference)
 
+> Assumes `skill-firewall` is on your `PATH` (`npm i -g skill-firewall`). Otherwise prefix each command with `npx`.
+
 ```bash
 # --- Scan (Phase 1) ---
-node dist/cli.js scan ./my-skill/SKILL.md     # a file
-node dist/cli.js scan ~/.claude/skills        # a directory, recursive (.mcp.json too)
-node dist/cli.js scan https://raw.githubusercontent.com/owner/repo/main/SKILL.md  # a URL
+skill-firewall scan ./my-skill/SKILL.md     # a file
+skill-firewall scan ~/.claude/skills        # a directory, recursive (.mcp.json too)
+skill-firewall scan https://raw.githubusercontent.com/owner/repo/main/SKILL.md  # a URL
 
 # --- Resident (Phase 2: Claude Code hooks) ---
-node dist/cli.js install-hook                 # auto-scan on SessionStart, inject warning
-node dist/cli.js install-hook --quarantine    # auto-quarantine HIGH findings
-node dist/cli.js scan-skills                  # scan all known skill directories at once
-node dist/cli.js allow ./my-skill/SKILL.md    # approve (sha256; suppresses later warnings)
+skill-firewall install-hook                 # auto-scan on SessionStart, inject warning
+skill-firewall install-hook --quarantine    # auto-quarantine HIGH findings
+skill-firewall scan-skills                  # scan all known skill directories at once
+skill-firewall allow ./my-skill/SKILL.md    # approve (sha256; suppresses later warnings)
 
 # --- Phase 3 ---
-node dist/cli.js scan ./skill --llm           # LLM second-pass for gray (medium+) ones (claude CLI or API key)
-node dist/cli.js provenance github:owner/repo # source check: existence / version pinning / freshness
-node dist/cli.js add github:owner/repo        # quarantining install (fetch → quarantined scan → place if safe)
-node dist/cli.js add ./skill --llm            # add, with LLM judgment
-node dist/cli.js quarantine                   # list quarantined / pending items
+skill-firewall scan ./skill --llm           # LLM second-pass for gray (medium+) ones (claude CLI or API key)
+skill-firewall provenance github:owner/repo # source check: existence / version pinning / freshness
+skill-firewall add github:owner/repo        # quarantining install (fetch → quarantined scan → place if safe)
+skill-firewall add ./skill --llm            # add, with LLM judgment
+skill-firewall quarantine                   # list quarantined / pending items
 
 # during development, npm scripts work too
 npm run dev -- scan ./my-skill/SKILL.md
@@ -153,13 +155,6 @@ npm run build   # outputs to dist/
 npm run dev -- scan <path>
 ```
 
-### Roadmap
-
-- [x] **Phase 1**: CLI static scanner (file/dir/URL, rule set, two-stage scan)
-- [x] **Phase 2**: Claude Code hooks (SessionStart auto-scan → warn → quarantine / allowlist)
-- [x] **Phase 3**: LLM second pass, provenance check, quarantining installer, `.mcp.json` support, quarantine list
-- [ ] **Phase 4**: npm publish, article series, website (if there's demand)
-
 ---
 
 ## 日本語
@@ -201,28 +196,30 @@ npx skill-firewall install-hook              # 警告モード
 詳細: `skill-firewall scan-skills` / 退避: `skill-firewall scan-skills --quarantine`
 ```
 
-解除は `node dist/cli.js uninstall-hook`。
+解除は `skill-firewall uninstall-hook`。
 
 ### All commands (reference)
 
+> `skill-firewall` が `PATH` にある前提（`npm i -g skill-firewall`）。無い場合は各コマンドに `npx` を前置。
+
 ```bash
 # --- スキャン（Phase 1）---
-node dist/cli.js scan ./my-skill/SKILL.md     # ファイル
-node dist/cli.js scan ~/.claude/skills        # ディレクトリ再帰（.mcp.json も対象）
-node dist/cli.js scan https://raw.githubusercontent.com/owner/repo/main/SKILL.md  # URL
+skill-firewall scan ./my-skill/SKILL.md     # ファイル
+skill-firewall scan ~/.claude/skills        # ディレクトリ再帰（.mcp.json も対象）
+skill-firewall scan https://raw.githubusercontent.com/owner/repo/main/SKILL.md  # URL
 
 # --- 常駐（Phase 2: Claude Code hooks）---
-node dist/cli.js install-hook                 # SessionStart で自動スキャン→警告注入
-node dist/cli.js install-hook --quarantine    # HIGH を自動隔離するモード
-node dist/cli.js scan-skills                  # 既知スキルディレクトリを一括スキャン
-node dist/cli.js allow ./my-skill/SKILL.md    # 承認（sha256。以降の警告を抑制）
+skill-firewall install-hook                 # SessionStart で自動スキャン→警告注入
+skill-firewall install-hook --quarantine    # HIGH を自動隔離するモード
+skill-firewall scan-skills                  # 既知スキルディレクトリを一括スキャン
+skill-firewall allow ./my-skill/SKILL.md    # 承認（sha256。以降の警告を抑制）
 
 # --- Phase 3 ---
-node dist/cli.js scan ./skill --llm           # 灰色(medium+)のみ LLM 二次判定（claude CLI か API キー）
-node dist/cli.js provenance github:owner/repo # 取得元の実在・バージョン固定・新しさ
-node dist/cli.js add github:owner/repo        # 検疫付きインストール（取得→隔離スキャン→安全なら配置）
-node dist/cli.js add ./skill --llm            # add に LLM 判定を併用
-node dist/cli.js quarantine                   # 隔離中・配置保留中を一覧
+skill-firewall scan ./skill --llm           # 灰色(medium+)のみ LLM 二次判定（claude CLI か API キー）
+skill-firewall provenance github:owner/repo # 取得元の実在・バージョン固定・新しさ
+skill-firewall add github:owner/repo        # 検疫付きインストール（取得→隔離スキャン→安全なら配置）
+skill-firewall add ./skill --llm            # add に LLM 判定を併用
+skill-firewall quarantine                   # 隔離中・配置保留中を一覧
 
 # 開発中は npm script でも可
 npm run dev -- scan ./my-skill/SKILL.md
@@ -301,13 +298,6 @@ npm test        # 悪性/正常サンプルで検証（検出率・HIGH誤検知
 npm run build   # dist/ に出力
 npm run dev -- scan <path>
 ```
-
-### Roadmap
-
-- [x] **Phase 1**: CLI 静的スキャナ（ファイル/ディレクトリ/URL、ルール群、2段スキャン）
-- [x] **Phase 2**: Claude Code hooks 連携（SessionStart 自動スキャン→警告注入→隔離・allowlist）
-- [x] **Phase 3**: LLM 二次判定・出所チェック・検疫付きインストーラ・`.mcp.json` 本格対応・隔離一覧
-- [ ] **Phase 4**: npm 公開・note 連載記事・Web サイト化（需要があれば）
 
 ---
 
